@@ -81,7 +81,7 @@ public class ActivitySelection {
             timeList.add(new Activity(l, r, p));
         }
         sc.close();
-:
+
         int maxProfit = selectActivities(timeList);
         System.out.println(maxProfit);
         FileWriter answerWriter = new FileWriter(outputFile);
