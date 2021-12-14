@@ -1,5 +1,13 @@
+import javax.xml.soap.Node;
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalUnit;
 import java.util.*;
 
 class ByteArrayWrapper implements Serializable {
@@ -23,90 +31,92 @@ class ByteArrayWrapper implements Serializable {
 
     @Override
     public String toString() {
-        String s = "";
+        StringBuilder s = new StringBuilder();
         for(byte x: data)
-            s += (char)x + " ";
-        return s;
+            s.append((char) x).append(" ");
+        return s.toString();
     }
 }
 
 
-class TreeNode implements Comparable<TreeNode>, Serializable {
-    public int count;
+class TreeNode implements Serializable {
     public TreeNode left;
     public TreeNode right;
 
-    TreeNode(int count) {
-        this.count = count;
+    TreeNode() {
         left = null;
         right = null;
-    }
-
-    @Override
-    public int compareTo(TreeNode treeNode) {
-        return count - treeNode.count;
     }
 }
 
 class LeafNode extends TreeNode {
-    public BitSet character;
+    public byte[] character;
 
-    LeafNode(byte[] character, int count) {
-        super(count);
-        this.character = new BitSet(character.length);
-        for(int i = 0; i < character.length;i++)
-            if(character[i] == 1)
-                this.character.set(i);
+    LeafNode(byte[] character) {
+        this.character = character;
     }
 }
 
 
 class MetaData implements Serializable {
-//    Map<ByteArrayWrapper, byte[]> compressedToCharacter;
     List<TreeNode> nodeList;
     int numberOfBits;
-    int groupSize;
     byte[] lastPart;
+    int groupSize;
 
-    public MetaData(List<TreeNode> nodeList, int numberOfBits, byte[] lastPart) {
+    public MetaData(List<TreeNode> nodeList, int numberOfBits, byte[] lastPart, int groupSize) {
         this.nodeList = nodeList;
         this.numberOfBits = numberOfBits;
         this.lastPart = lastPart;
+        this.groupSize = groupSize;
     }
 
-    public void writeMetaData(OutputStream stream) {
-
-    }
 }
 
+class NodeWrapper implements Comparable<NodeWrapper> {
+    TreeNode root;
+    int count;
+
+    public NodeWrapper(TreeNode root, int count) {
+        this.root = root;
+        this.count = count;
+    }
+
+    @Override
+    public int compareTo(NodeWrapper nodeWrapper) {
+        return count - nodeWrapper.count;
+    }
+}
 
 public class HuffmanCompression {
 
 
     Map<ByteArrayWrapper, byte[]> characterToCompressed;
-    Map<ByteArrayWrapper, byte[]> compressedToCharacter;
     List<TreeNode> nodeList;
     int numberOfBits;
     byte[] lastPart;
+    private static final int BUFFER_SIZE = 8192;
 
 
     public HuffmanCompression() {
         characterToCompressed = new HashMap<>();
-        compressedToCharacter = new HashMap<>();
         nodeList = new ArrayList<>();
         numberOfBits = 0;
     }
 
     public Map<ByteArrayWrapper, Integer> readCharacterCounts(String path, int groupSize) throws IOException {
         HashMap<ByteArrayWrapper, Integer> characterCount = new HashMap<>();
-        // TODO: handle remaining bytes
         try(InputStream ios = new FileInputStream(path)) {
-            byte[] buffer = new byte[groupSize];    // TODO: Bulk read
+            byte[] bufferRead = new byte[groupSize * 4096];
+            byte[] buffer = new byte[groupSize];
             int readBytes = 0;
-            while ((readBytes = ios.read(buffer)) != -1 && readBytes == groupSize) {
-                int currentCount = characterCount.getOrDefault(new ByteArrayWrapper(buffer), 0);
-                characterCount.put(new ByteArrayWrapper(buffer), currentCount + 1);
-                buffer = new byte[groupSize];
+            while ((readBytes = ios.read(bufferRead)) != -1) {
+                for (int groupIndex = 0; groupIndex + groupSize <= readBytes; groupIndex += groupSize) {
+                    System.arraycopy(bufferRead, groupIndex, buffer, 0, groupSize);
+                    int currentCount = characterCount.getOrDefault(new ByteArrayWrapper(buffer), 0);
+                    characterCount.put(new ByteArrayWrapper(buffer), currentCount + 1);
+                    buffer = new byte[groupSize];
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -114,23 +124,27 @@ public class HuffmanCompression {
         return characterCount;
     }
 
-    public void generateHuffmanTree(Map<ByteArrayWrapper, Integer> characterCounts) throws IOException {
-        PriorityQueue<TreeNode> queue = new PriorityQueue<>();
+    public void generateHuffmanTree(Map<ByteArrayWrapper, Integer> characterCounts) {
+        PriorityQueue<NodeWrapper> queue = new PriorityQueue<>();
+
         for(Map.Entry<ByteArrayWrapper, Integer> entry: characterCounts.entrySet()) {
-            LeafNode leafNode = new LeafNode(entry.getKey().data, entry.getValue());
-            queue.add(leafNode);
+            LeafNode leafNode = new LeafNode(entry.getKey().data);
+            NodeWrapper wrapper = new NodeWrapper(leafNode, entry.getValue());
+            queue.add(wrapper);
+
             nodeList.add(leafNode);
         }
 
         while (queue.size() > 1) {
-            TreeNode left = queue.poll();
-            TreeNode right = queue.poll();
+            NodeWrapper leftWrapper = queue.poll();
+            NodeWrapper rightWrapper = queue.poll();
 
-            TreeNode newNode = new TreeNode(left.count + right.count);
-            newNode.left = left;
-            newNode.right = right;
+            TreeNode newNode = new TreeNode();
+            NodeWrapper newNodeWrapper = new NodeWrapper(newNode, leftWrapper.count + rightWrapper.count);
+            newNode.left = leftWrapper.root;
+            newNode.right = rightWrapper.root;
 
-            queue.add(newNode);
+            queue.add(newNodeWrapper);
             nodeList.add(newNode);
         }
     }
@@ -140,16 +154,11 @@ public class HuffmanCompression {
         if(root == null)
             return;
         if(root.getClass() == LeafNode.class) {
-            // TODO: handle the case when the group size is equal to the file size
             byte[] compressedReprArray = new byte[compressedRepr.size()];
             for(int i = 0; i < compressedReprArray.length; i++)
                 compressedReprArray[i] = compressedRepr.get(i);
-            byte[] characterByteArray = new byte[((LeafNode) root).character.length()];
-            for(int i = 0; i < characterByteArray.length; i++)
-                if(((LeafNode) root).character.get(i))
-                    characterByteArray[i] = 1;
+            byte[] characterByteArray = ((LeafNode) root).character;
             characterToCompressed.put(new ByteArrayWrapper(characterByteArray), compressedReprArray);
-            compressedToCharacter.put(new ByteArrayWrapper(compressedReprArray), characterByteArray);
             return;
         }
         compressedRepr.add((byte) 0);
@@ -168,48 +177,51 @@ public class HuffmanCompression {
 
 
     private void compress(String path, int groupSize) throws IOException {
+        Instant startTime = Instant.now();
         Map<ByteArrayWrapper, Integer> characterCount = readCharacterCounts(path, groupSize);
         generateHuffmanTree(characterCount);
         generateCodeWords();
 
         try(InputStream ios = new FileInputStream(path);
-            OutputStream outputStream = new FileOutputStream(path + "compressed")) {
+            OutputStream outputStream = new FileOutputStream(path + ".tmp")) {
             byte[] buffer = new byte[groupSize];
+            byte[] readBuffer = new byte[groupSize * 4096];
             int readBytes;
             int bitIndex = 0;
             byte byteToWrite = 0;
 
             byte[] writeBuffer = new byte[4096];
             int writeBufferIndex = 0;
-            while ((readBytes = ios.read(buffer)) != -1) {
-                if(readBytes == groupSize) {
+            while ((readBytes = ios.read(readBuffer)) != -1) {
+                int groupIndex = 0;
+                for(; groupIndex + groupSize <= readBytes; groupIndex += groupSize) {
+                    System.arraycopy(readBuffer, groupIndex, buffer, 0, groupSize);
                     byte[] compressedBits = characterToCompressed.get(new ByteArrayWrapper(buffer));
 
                     for(byte bit: compressedBits) {
                         numberOfBits++;
                         if(bit == 1)
                             byteToWrite |= (1 << bitIndex);
-                        bitIndex = (bitIndex + 1) % 8;
-                        if (bitIndex == 0) {
+                        bitIndex++;
+                        if (bitIndex == 8) {
                             writeBuffer[writeBufferIndex++] = byteToWrite;
                             if(writeBufferIndex == 4096) {
                                 writeBufferIndex = 0;
                                 outputStream.write(writeBuffer);
                             }
                             byteToWrite = 0;
+                            bitIndex = 0;
                         }
                     }
                 }
-                else {
-                    // TODO: check size
-                    lastPart = new byte[readBytes];
-                    System.arraycopy(buffer, 0, lastPart, 0, readBytes);
+                if (groupIndex != readBytes) {
+                    int len = readBytes - groupIndex;
+                    lastPart = new byte[len];
+                    System.arraycopy(readBuffer, groupIndex, lastPart, 0, len);
                 }
             }
-            if(bitIndex > 0) {
+            if(bitIndex > 0)
                 writeBuffer[writeBufferIndex++] = byteToWrite;
-//                outputStream.write(byteToWrite);
-            }
 
             if(writeBufferIndex > 0)
                 outputStream.write(writeBuffer, 0, writeBufferIndex);
@@ -218,7 +230,7 @@ public class HuffmanCompression {
             e.printStackTrace();
         }
 
-        MetaData metaData = new MetaData(nodeList, numberOfBits, lastPart);
+        MetaData metaData = new MetaData(nodeList, numberOfBits, lastPart, groupSize);
         byte[] metaDataBytes = null;
         try(
                 ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -230,20 +242,33 @@ public class HuffmanCompression {
             e.printStackTrace();
         }
 
-        try(OutputStream outputStream = new FileOutputStream(path + "huffman");
-            InputStream inputStream = new FileInputStream(path + "compressed")) {
+        File file = new File(path);
+        String fileName = file.getName();
+        String compressedFileName = "18010078." + fileName + ".hc";
+        File compressedFile = new File(file.getParentFile(), compressedFileName);
+
+        try(OutputStream outputStream = new FileOutputStream(compressedFile);
+            InputStream inputStream = new FileInputStream(path + ".tmp")) {
 
             outputStream.write(ByteBuffer.allocate(4).putInt(metaDataBytes.length).array());
-            System.out.println("Metadata length: " + metaDataBytes.length);
             outputStream.write(metaDataBytes);
-            byte[] buffer = new byte[4096];
+            byte[] buffer = new byte[BUFFER_SIZE];
             int readBytes;
             while ((readBytes = inputStream.read(buffer)) != -1)
                 outputStream.write(buffer, 0, readBytes);
         }
+        File tmpFile = new File(path + ".tmp");
+        tmpFile.delete();
+        Instant endTime = Instant.now();
+        Duration duration = Duration.between(startTime, endTime);
+        System.out.println("Execution Time: " +
+                LocalTime.MIDNIGHT.plus(duration).format(DateTimeFormatter.ofPattern("HH:mm:ss SSS")));
+        double compressionRatio = (1 - (double)Files.size(compressedFile.toPath()) / Files.size(file.toPath())) * 100.0;
+        System.out.println("Compression Ratio: " + String.format("%.2f", compressionRatio) + "%");
     }
 
     public void decompress(String path) {
+        Instant startTime = Instant.now();
         try (InputStream fileStream = new FileInputStream(path)) {
             byte[] sizeBuffer = new byte[4];
             fileStream.read(sizeBuffer);
@@ -254,9 +279,15 @@ public class HuffmanCompression {
             try(ObjectInput objectInput = new ObjectInputStream(new ByteArrayInputStream(metaDataBytes))) {
                 metaData = (MetaData) objectInput.readObject();
             }
+            File compressedFile = new File(path);
+            String fileName = compressedFile.getName();
+            String decompressedFileName = "extracted." + fileName.substring(0, fileName.length() - 3);
+            String decompressedFilePath = new File(compressedFile.getParentFile(), decompressedFileName).toString();
 
-            try (OutputStream outputStream = new FileOutputStream(path + "decompressed")) {
-                byte[] buffer = new byte[4096];
+            try (OutputStream outputStream = new FileOutputStream(decompressedFilePath)) {
+                byte[] buffer = new byte[BUFFER_SIZE];
+                byte[] writeBuffer = new byte[BUFFER_SIZE * metaData.groupSize];
+                int writeIndex = 0;
                 int readBytes;
                 TreeNode root = metaData.nodeList.get(metaData.nodeList.size() - 1);
                 TreeNode cur = root;
@@ -271,30 +302,55 @@ public class HuffmanCompression {
                         cur = bit == 0? cur.left : cur.right;
 
                         if(cur.getClass() == LeafNode.class) {
-                            byte[] characterByteArray = new byte[((LeafNode) root).character.length()];
-                            for(int j = 0; j < characterByteArray.length; j++)
-                                if(((LeafNode) root).character.get(j))
-                                    characterByteArray[j] = 1;
-                            outputStream.write(characterByteArray);
+                            System.arraycopy(((LeafNode) cur).character, 0, writeBuffer, writeIndex, metaData.groupSize);
+                            writeIndex += metaData.groupSize;
+                            if(writeIndex == writeBuffer.length) {
+                                outputStream.write(writeBuffer);
+                                writeIndex = 0;
+                            }
                             cur = root;
                         }
                     }
                     metaData.numberOfBits -= readBytes * 8;
                 }
+                if(writeIndex > 0)
+                    outputStream.write(writeBuffer, 0, writeIndex);
+
                 if(metaData.lastPart != null)
                     outputStream.write(metaData.lastPart);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
+        Instant endTime = Instant.now();
+        Duration duration = Duration.between(startTime, endTime);
+        System.out.println("Execution Time: " +
+                LocalTime.MIDNIGHT.plus(duration).format(DateTimeFormatter.ofPattern("HH:mm:ss SSS")));
     }
 
     public static void main(String[] args) throws IOException {
-        String path = "/home/abe-mark45/Projects/AlgorithmsLab2/gbbct10.seq.gz";
-        HuffmanCompression huffmanCompression = new HuffmanCompression();
-        huffmanCompression.compress(path, 32);
-        System.out.println("copress done");
-        huffmanCompression.decompress("/home/abe-mark45/Projects/AlgorithmsLab2/gbbct10.seq.gzhuffman");
-
+//        String path = "/home/abe-mark45/Projects/AlgorithmsLab2/lecture6.pdf";
+//        HuffmanCompression huffmanCompression = new HuffmanCompression();
+//        huffmanCompression.compress(path, 1);
+//        System.out.println("copress done");
+//        huffmanCompression.decompress("/home/abe-mark45/Projects/AlgorithmsLab2/lecture6.pdf.huffman");
+        if(args.length == 0)
+            System.out.println("invalid arguments");
+        else if(args[0].equals("c")) {
+            if(args.length != 3)
+                System.out.println("invalid arguments");
+            else {
+                HuffmanCompression huffmanCompression = new HuffmanCompression();
+                huffmanCompression.compress(args[1], Integer.parseInt(args[2]));
+            }
+        }
+        else if (args[0].equals("d")) {
+            if(args.length != 2)
+                System.out.println("invalid arguments");
+            else {
+                HuffmanCompression huffmanCompression = new HuffmanCompression();
+                huffmanCompression.decompress(args[1]);
+            }
+        }
     }
 }
