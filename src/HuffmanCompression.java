@@ -1,4 +1,3 @@
-import javax.xml.soap.Node;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -6,8 +5,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalUnit;
 import java.util.*;
 
 class ByteArrayWrapper implements Serializable {
@@ -70,7 +67,6 @@ class MetaData implements Serializable {
         this.lastPart = lastPart;
         this.groupSize = groupSize;
     }
-
 }
 
 class NodeWrapper implements Comparable<NodeWrapper> {
@@ -104,12 +100,12 @@ public class HuffmanCompression {
         numberOfBits = 0;
     }
 
-    public Map<ByteArrayWrapper, Integer> readCharacterCounts(String path, int groupSize) throws IOException {
+    public Map<ByteArrayWrapper, Integer> readCharacterCounts(String path, int groupSize) {
         HashMap<ByteArrayWrapper, Integer> characterCount = new HashMap<>();
         try(InputStream ios = new FileInputStream(path)) {
-            byte[] bufferRead = new byte[groupSize * 4096];
+            byte[] bufferRead = new byte[groupSize * BUFFER_SIZE];
             byte[] buffer = new byte[groupSize];
-            int readBytes = 0;
+            int readBytes;
             while ((readBytes = ios.read(bufferRead)) != -1) {
                 for (int groupIndex = 0; groupIndex + groupSize <= readBytes; groupIndex += groupSize) {
                     System.arraycopy(bufferRead, groupIndex, buffer, 0, groupSize);
@@ -150,29 +146,29 @@ public class HuffmanCompression {
     }
 
 
-    private void generateCodeWords(TreeNode root, List<Byte> compressedRepr) {
+    private void generateCodeWords(TreeNode root, List<Byte> compressed) {
         if(root == null)
             return;
         if(root.getClass() == LeafNode.class) {
-            byte[] compressedReprArray = new byte[compressedRepr.size()];
-            for(int i = 0; i < compressedReprArray.length; i++)
-                compressedReprArray[i] = compressedRepr.get(i);
+            byte[] compressedRepArray = new byte[compressed.size()];
+            for(int i = 0; i < compressedRepArray.length; i++)
+                compressedRepArray[i] = compressed.get(i);
             byte[] characterByteArray = ((LeafNode) root).character;
-            characterToCompressed.put(new ByteArrayWrapper(characterByteArray), compressedReprArray);
+            characterToCompressed.put(new ByteArrayWrapper(characterByteArray), compressedRepArray);
             return;
         }
-        compressedRepr.add((byte) 0);
-        generateCodeWords(root.left, compressedRepr);
-        compressedRepr.remove(compressedRepr.size() - 1);
-        compressedRepr.add((byte) 1);
-        generateCodeWords(root.right, compressedRepr);
-        compressedRepr.remove(compressedRepr.size() - 1);
+        compressed.add((byte) 0);
+        generateCodeWords(root.left, compressed);
+        compressed.remove(compressed.size() - 1);
+        compressed.add((byte) 1);
+        generateCodeWords(root.right, compressed);
+        compressed.remove(compressed.size() - 1);
     }
 
     private void generateCodeWords() {
-        List<Byte> compressedRepr = new ArrayList<>();
+        List<Byte> compressedRep = new ArrayList<>();
         TreeNode root = nodeList.get(nodeList.size() - 1);
-        generateCodeWords(root, compressedRepr);
+        generateCodeWords(root, compressedRep);
     }
 
 
@@ -185,12 +181,12 @@ public class HuffmanCompression {
         try(InputStream ios = new FileInputStream(path);
             OutputStream outputStream = new FileOutputStream(path + ".tmp")) {
             byte[] buffer = new byte[groupSize];
-            byte[] readBuffer = new byte[groupSize * 4096];
+            byte[] readBuffer = new byte[groupSize * BUFFER_SIZE];
             int readBytes;
             int bitIndex = 0;
             byte byteToWrite = 0;
 
-            byte[] writeBuffer = new byte[4096];
+            byte[] writeBuffer = new byte[BUFFER_SIZE];
             int writeBufferIndex = 0;
             while ((readBytes = ios.read(readBuffer)) != -1) {
                 int groupIndex = 0;
@@ -205,7 +201,7 @@ public class HuffmanCompression {
                         bitIndex++;
                         if (bitIndex == 8) {
                             writeBuffer[writeBufferIndex++] = byteToWrite;
-                            if(writeBufferIndex == 4096) {
+                            if(writeBufferIndex == BUFFER_SIZE) {
                                 writeBufferIndex = 0;
                                 outputStream.write(writeBuffer);
                             }
@@ -263,7 +259,12 @@ public class HuffmanCompression {
         Duration duration = Duration.between(startTime, endTime);
         System.out.println("Execution Time: " +
                 LocalTime.MIDNIGHT.plus(duration).format(DateTimeFormatter.ofPattern("HH:mm:ss SSS")));
-        double compressionRatio = (1 - (double)Files.size(compressedFile.toPath()) / Files.size(file.toPath())) * 100.0;
+        long sizeBeforeCompression = Files.size(file.toPath());
+        long sizeAfterCompression = Files.size(compressedFile.toPath());
+        double compressionRatio = (1 - (double) sizeAfterCompression / sizeBeforeCompression) * 100.0;
+        System.out.println("Size Before Compression: " + String.format("%,d", sizeBeforeCompression) + " bytes");
+        System.out.println("Size After Compression: " + String.format("%,d", sizeAfterCompression) + " bytes");
+        System.out.println();
         System.out.println("Compression Ratio: " + String.format("%.2f", compressionRatio) + "%");
     }
 
@@ -329,11 +330,6 @@ public class HuffmanCompression {
     }
 
     public static void main(String[] args) throws IOException {
-//        String path = "/home/abe-mark45/Projects/AlgorithmsLab2/lecture6.pdf";
-//        HuffmanCompression huffmanCompression = new HuffmanCompression();
-//        huffmanCompression.compress(path, 1);
-//        System.out.println("copress done");
-//        huffmanCompression.decompress("/home/abe-mark45/Projects/AlgorithmsLab2/lecture6.pdf.huffman");
         if(args.length == 0)
             System.out.println("invalid arguments");
         else if(args[0].equals("c")) {
