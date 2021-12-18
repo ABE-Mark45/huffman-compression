@@ -57,11 +57,11 @@ class LeafNode extends TreeNode {
 
 class MetaData implements Serializable {
     List<TreeNode> nodeList;
-    int numberOfBits;
+    long numberOfBits;
     byte[] lastPart;
     int groupSize;
 
-    public MetaData(List<TreeNode> nodeList, int numberOfBits, byte[] lastPart, int groupSize) {
+    public MetaData(List<TreeNode> nodeList, long numberOfBits, byte[] lastPart, int groupSize) {
         this.nodeList = nodeList;
         this.numberOfBits = numberOfBits;
         this.lastPart = lastPart;
@@ -85,22 +85,9 @@ class NodeWrapper implements Comparable<NodeWrapper> {
 }
 
 public class HuffmanCompression {
-
-
-    Map<ByteArrayWrapper, byte[]> characterToCompressed;
-    List<TreeNode> nodeList;
-    int numberOfBits;
-    byte[] lastPart;
     private static final int BUFFER_SIZE = 8192;
 
-
-    public HuffmanCompression() {
-        characterToCompressed = new HashMap<>();
-        nodeList = new ArrayList<>();
-        numberOfBits = 0;
-    }
-
-    public Map<ByteArrayWrapper, Integer> readCharacterCounts(String path, int groupSize) {
+    private static Map<ByteArrayWrapper, Integer> readCharacterCounts(String path, int groupSize) {
         HashMap<ByteArrayWrapper, Integer> characterCount = new HashMap<>();
         try(InputStream ios = new FileInputStream(path)) {
             byte[] bufferRead = new byte[groupSize * BUFFER_SIZE];
@@ -120,7 +107,7 @@ public class HuffmanCompression {
         return characterCount;
     }
 
-    public void generateHuffmanTree(Map<ByteArrayWrapper, Integer> characterCounts) {
+    public static void generateHuffmanTree(Map<ByteArrayWrapper, Integer> characterCounts, List<TreeNode> nodeList) {
         PriorityQueue<NodeWrapper> queue = new PriorityQueue<>();
 
         for(Map.Entry<ByteArrayWrapper, Integer> entry: characterCounts.entrySet()) {
@@ -146,37 +133,41 @@ public class HuffmanCompression {
     }
 
 
-    private void generateCodeWords(TreeNode root, List<Byte> compressed) {
+    private static void generateCodeWords(TreeNode root, List<Boolean> compressed, Map<ByteArrayWrapper, boolean[]> characterToCompressed) {
         if(root == null)
             return;
         if(root.getClass() == LeafNode.class) {
-            byte[] compressedRepArray = new byte[compressed.size()];
+            boolean[] compressedRepArray = new boolean[compressed.size()];
             for(int i = 0; i < compressedRepArray.length; i++)
                 compressedRepArray[i] = compressed.get(i);
             byte[] characterByteArray = ((LeafNode) root).character;
             characterToCompressed.put(new ByteArrayWrapper(characterByteArray), compressedRepArray);
             return;
         }
-        compressed.add((byte) 0);
-        generateCodeWords(root.left, compressed);
+        compressed.add(false);
+        generateCodeWords(root.left, compressed, characterToCompressed);
         compressed.remove(compressed.size() - 1);
-        compressed.add((byte) 1);
-        generateCodeWords(root.right, compressed);
+        compressed.add(true);
+        generateCodeWords(root.right, compressed, characterToCompressed);
         compressed.remove(compressed.size() - 1);
     }
 
-    private void generateCodeWords() {
-        List<Byte> compressedRep = new ArrayList<>();
+    private static void generateCodeWords(List<TreeNode> nodeList, Map<ByteArrayWrapper, boolean[]> characterToCompressed) {
+        List<Boolean> compressedRep = new ArrayList<>();
         TreeNode root = nodeList.get(nodeList.size() - 1);
-        generateCodeWords(root, compressedRep);
+        generateCodeWords(root, compressedRep, characterToCompressed);
     }
 
 
-    private void compress(String path, int groupSize) throws IOException {
+    private static void compress(String path, int groupSize) throws IOException {
         Instant startTime = Instant.now();
+        List<TreeNode> nodeList = new ArrayList<>();
         Map<ByteArrayWrapper, Integer> characterCount = readCharacterCounts(path, groupSize);
-        generateHuffmanTree(characterCount);
-        generateCodeWords();
+        Map<ByteArrayWrapper, boolean[]> characterToCompressed = new HashMap<>();
+        generateHuffmanTree(characterCount, nodeList);
+        generateCodeWords(nodeList, characterToCompressed);
+        long numberOfBits = 0;
+        byte[] lastPart = null;
 
         try(InputStream ios = new FileInputStream(path);
             OutputStream outputStream = new FileOutputStream(path + ".tmp")) {
@@ -192,11 +183,11 @@ public class HuffmanCompression {
                 int groupIndex = 0;
                 for(; groupIndex + groupSize <= readBytes; groupIndex += groupSize) {
                     System.arraycopy(readBuffer, groupIndex, buffer, 0, groupSize);
-                    byte[] compressedBits = characterToCompressed.get(new ByteArrayWrapper(buffer));
+                    boolean[] compressedBits = characterToCompressed.get(new ByteArrayWrapper(buffer));
 
-                    for(byte bit: compressedBits) {
+                    for(boolean bit: compressedBits) {
                         numberOfBits++;
-                        if(bit == 1)
+                        if(bit)
                             byteToWrite |= (1 << bitIndex);
                         bitIndex++;
                         if (bitIndex == 8) {
@@ -268,7 +259,7 @@ public class HuffmanCompression {
         System.out.println("Compression Ratio: " + String.format("%.2f", compressionRatio) + "%");
     }
 
-    public void decompress(String path) {
+    public static void decompress(String path) {
         Instant startTime = Instant.now();
         try (InputStream fileStream = new FileInputStream(path)) {
             byte[] sizeBuffer = new byte[4];
@@ -312,7 +303,7 @@ public class HuffmanCompression {
                             cur = root;
                         }
                     }
-                    metaData.numberOfBits -= readBytes * 8;
+                    metaData.numberOfBits -= readBytes * 8L;
                 }
                 if(writeIndex > 0)
                     outputStream.write(writeBuffer, 0, writeIndex);
@@ -335,18 +326,14 @@ public class HuffmanCompression {
         else if(args[0].equals("c")) {
             if(args.length != 3)
                 System.out.println("invalid arguments");
-            else {
-                HuffmanCompression huffmanCompression = new HuffmanCompression();
-                huffmanCompression.compress(args[1], Integer.parseInt(args[2]));
-            }
+            else
+                HuffmanCompression.compress(args[1], Integer.parseInt(args[2]));
         }
         else if (args[0].equals("d")) {
             if(args.length != 2)
                 System.out.println("invalid arguments");
-            else {
-                HuffmanCompression huffmanCompression = new HuffmanCompression();
-                huffmanCompression.decompress(args[1]);
-            }
+            else
+                HuffmanCompression.decompress(args[1]);
         }
     }
 }
