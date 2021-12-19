@@ -1,3 +1,5 @@
+package huffman;
+
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -231,7 +233,7 @@ public class HuffmanCompression {
 
         File file = new File(path);
         String fileName = file.getName();
-        String compressedFileName = "18010078." + fileName + ".hc";
+        String compressedFileName = "18010078." + groupSize +"." + fileName + ".hc";
         File compressedFile = new File(file.getParentFile(), compressedFileName);
 
         try(OutputStream outputStream = new FileOutputStream(compressedFile);

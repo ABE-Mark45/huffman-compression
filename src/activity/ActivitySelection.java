@@ -1,3 +1,5 @@
+package activity;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -69,9 +71,15 @@ public class ActivitySelection {
         return memoTable[n];
     }
 
+    private static String extractFileName(File file) {
+        String fileName = file.getName();
+        int dotPosition = fileName.lastIndexOf('.');
+        return fileName.substring(0, dotPosition);
+    }
+
     public static void main(String[] args) throws IOException {
         File inputFile = new File(args[0]);
-        File outputFile = new File(inputFile.getParentFile(), "test1_18010078.out");
+        File outputFile = new File(inputFile.getParentFile(), extractFileName(inputFile) + "_18010078.out");
         Scanner sc = new Scanner(inputFile);
 
         int activityCount = sc.nextInt();
